@@ -41,38 +41,35 @@ class Database:
             """
             )
 
-    def _get_connection(self):
-        return sqlite3.connect(self.db_name)
-
     # User operations
     def create_user(self, username: str, name: str) -> int:
-        with self._get_connection() as conn:
+        with self.driver.session() as conn:
             cursor = conn.cursor()
             cursor.execute('INSERT INTO users (username, name) VALUES (?, ?)', (username, name))
             return cursor.lastrowid
 
     def get_user(self, user_id: int) -> Optional[dict]:
-        with self._get_connection() as conn:
+        with self.driver.session() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT id, username, name FROM users WHERE id = ?', (user_id,))
             row = cursor.fetchone()
             return {'id': row[0], 'username': row[1], 'name': row[2]} if row else None
 
     def get_all_users(self) -> List[dict]:
-        with self._get_connection() as conn:
+        with self.driver.session() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT id, username, name FROM users')
             return [{'id': row[0], 'username': row[1], 'name': row[2]} for row in cursor.fetchall()]
 
     # Post operations
     def create_post(self, user_id: int, content: str) -> int:
-        with self._get_connection() as conn:
+        with self.driver.session() as conn:
             cursor = conn.cursor()
             cursor.execute('INSERT INTO posts (user_id, content) VALUES (?, ?)', (user_id, content))
             return cursor.lastrowid
 
     def get_posts_by_user(self, user_id: int) -> List[dict]:
-        with self._get_connection() as conn:
+        with self.driver.session() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT p.id, p.content, p.timestamp, u.username, u.name 
@@ -89,7 +86,7 @@ class Database:
             } for row in cursor.fetchall()]
 
     def get_feed(self, user_id: int) -> List[dict]:
-        with self._get_connection() as conn:
+        with self.driver.session() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT p.id, p.content, p.timestamp, u.username, u.name 
@@ -109,7 +106,7 @@ class Database:
 
     # Follow operations
     def follow_user(self, follower_id: int, followee_id: int) -> bool:
-        with self._get_connection() as conn:
+        with self.driver.session() as conn:
             try:
                 conn.execute('INSERT INTO followers (follower_id, followee_id) VALUES (?, ?)', 
                            (follower_id, followee_id))
@@ -118,7 +115,7 @@ class Database:
                 return False
 
     def get_followers(self, user_id: int) -> List[dict]:
-        with self._get_connection() as conn:
+        with self.driver.session() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT u.id, u.username, u.name 
@@ -129,7 +126,7 @@ class Database:
             return [{'id': row[0], 'username': row[1], 'name': row[2]} for row in cursor.fetchall()]
 
     def get_following(self, user_id: int) -> List[dict]:
-        with self._get_connection() as conn:
+        with self.driver.session() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT u.id, u.username, u.name 
@@ -140,7 +137,7 @@ class Database:
             return [{'id': row[0], 'username': row[1], 'name': row[2]} for row in cursor.fetchall()]
 
     def unfollow_user(self, follower_id: int, followee_id: int) -> bool:
-        with self._get_connection() as conn:
+        with self.driver.session() as conn:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM followers WHERE follower_id = ? AND followee_id = ?', 
                         (follower_id, followee_id))
