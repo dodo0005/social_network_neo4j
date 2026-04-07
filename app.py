@@ -3,75 +3,74 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 import sqlite3
 from dataclasses import dataclass
 from typing import List, Optional
+from neo4j import GraphDatabase
 
-# ======================
-# Database Access Layer
-# ======================
+# URI examples: "neo4j://localhost", "neo4j+s://xxx.databases.neo4j.io"
+# URI examples: "neo4j://localhost", "neo4j+s://xxx.databases.neo4j.io"
+URI = "neo4j+s://3bac185a.databases.neo4j.io"
+AUTH = ("neo4j3bac185a", "xkm9Z_OZ8pIxcad3piAr0juH3m7WL3yzOsn5tuYkc_Y")
+
+
+driver = GraphDatabase.driver(URI, auth=AUTH)
+driver.verify_connectivity()
+
+
 class Database:
-    def __init__(self, db_name='social_network.db'):
-        self.db_name = db_name
+    def __init__(self, uri, user, password):
+        self.driver = GraphDatabase.driver(uri, auth=(user, password))
         self._init_db()
-    
+
+    def close(self):
+        self.driver.close()
+
     def _init_db(self):
-        with self._get_connection() as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    name TEXT NOT NULL
-                )
-            ''')
-            
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS posts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    content TEXT NOT NULL,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(user_id) REFERENCES users(id)
-                )
-            ''')
-            
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS followers (
-                    follower_id INTEGER NOT NULL,
-                    followee_id INTEGER NOT NULL,
-                    PRIMARY KEY(follower_id, followee_id),
-                    FOREIGN KEY(follower_id) REFERENCES users(id),
-                    FOREIGN KEY(followee_id) REFERENCES users(id)
-                )
-            ''')
-    
+        with self.driver.session() as session:
+            session.run(
+                """
+                CREATE CONSTRAINT unique_user_id IF NOT EXISTS
+                FOR (u:User)
+                REQUIRE u.id IS UNIQUE
+            """
+            )
+
+            session.run(
+                """
+                CREATE CONSTRAINT unique_username IF NOT EXISTS
+                FOR (u:User)
+                REQUIRE u.username IS UNIQUE
+            """
+            )
+
     def _get_connection(self):
         return sqlite3.connect(self.db_name)
-    
+
     # User operations
     def create_user(self, username: str, name: str) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('INSERT INTO users (username, name) VALUES (?, ?)', (username, name))
             return cursor.lastrowid
-    
+
     def get_user(self, user_id: int) -> Optional[dict]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT id, username, name FROM users WHERE id = ?', (user_id,))
             row = cursor.fetchone()
             return {'id': row[0], 'username': row[1], 'name': row[2]} if row else None
-    
+
     def get_all_users(self) -> List[dict]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT id, username, name FROM users')
             return [{'id': row[0], 'username': row[1], 'name': row[2]} for row in cursor.fetchall()]
-    
+
     # Post operations
     def create_post(self, user_id: int, content: str) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('INSERT INTO posts (user_id, content) VALUES (?, ?)', (user_id, content))
             return cursor.lastrowid
-    
+
     def get_posts_by_user(self, user_id: int) -> List[dict]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -88,7 +87,7 @@ class Database:
                 'username': row[3],
                 'name': row[4]
             } for row in cursor.fetchall()]
-    
+
     def get_feed(self, user_id: int) -> List[dict]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -107,7 +106,7 @@ class Database:
                 'username': row[3],
                 'name': row[4]
             } for row in cursor.fetchall()]
-    
+
     # Follow operations
     def follow_user(self, follower_id: int, followee_id: int) -> bool:
         with self._get_connection() as conn:
@@ -117,7 +116,7 @@ class Database:
                 return True
             except sqlite3.IntegrityError:
                 return False
-    
+
     def get_followers(self, user_id: int) -> List[dict]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -128,7 +127,7 @@ class Database:
                 WHERE f.followee_id = ?
             ''', (user_id,))
             return [{'id': row[0], 'username': row[1], 'name': row[2]} for row in cursor.fetchall()]
-    
+
     def get_following(self, user_id: int) -> List[dict]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -146,6 +145,7 @@ class Database:
             cursor.execute('DELETE FROM followers WHERE follower_id = ? AND followee_id = ?', 
                         (follower_id, followee_id))
             return cursor.rowcount > 0
+
 
 # ======================
 # Web Application
