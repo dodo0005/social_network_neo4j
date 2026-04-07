@@ -4,14 +4,19 @@ import sqlite3
 from dataclasses import dataclass
 from typing import List, Optional
 from neo4j import GraphDatabase
+from dotenv import load_dotenv
+import os
 
-# URI examples: "neo4j://localhost", "neo4j+s://xxx.databases.neo4j.io"
-# URI examples: "neo4j://localhost", "neo4j+s://xxx.databases.neo4j.io"
-URI = "neo4j+s://3bac185a.databases.neo4j.io"
-AUTH = ("neo4j3bac185a", "xkm9Z_OZ8pIxcad3piAr0juH3m7WL3yzOsn5tuYkc_Y")
+# Load .env file
+load_dotenv()
 
+# Get credentials from environment variables
+URI = os.getenv("NEO4J_URI")
+USER = os.getenv("NEO4J_USER")
+PASSWORD = os.getenv("NEO4J_PASSWORD")
 
-driver = GraphDatabase.driver(URI, auth=AUTH)
+# Create driver
+driver = GraphDatabase.driver(URI, auth=(USER, PASSWORD))
 driver.verify_connectivity()
 
 
@@ -75,28 +80,34 @@ class Database:
             return [dict(record) for record in result]
 
     # Post operations
-    def create_post(self, user_id: int, content: str) -> int:
-        with self.driver.session() as conn:
-            cursor = conn.cursor()
-            cursor.execute('INSERT INTO posts (user_id, content) VALUES (?, ?)', (user_id, content))
-            return cursor.lastrowid
+    def create_post(self, username: str, content: str) -> int:
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (u:User {username: $username})
+                CREATE (p:Post {content: $content, created_at: datetime()})
+                CREATE (u)-[:POSTED]->(p)
+                RETURN id(p) AS post_id
+                """,
+                username=username,
+                content=content
+            )
+            record = result.single()
+            return record["post_id"] if record else None
 
-    def get_posts_by_user(self, user_id: int) -> List[dict]:
-        with self.driver.session() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT p.id, p.content, p.timestamp, u.username, u.name 
-                FROM posts p JOIN users u ON p.user_id = u.id 
-                WHERE p.user_id = ?
-                ORDER BY p.timestamp DESC
-            ''', (user_id,))
-            return [{
-                'id': row[0],
-                'content': row[1],
-                'timestamp': row[2],
-                'username': row[3],
-                'name': row[4]
-            } for row in cursor.fetchall()]
+    def get_posts_by_user(self, username: str) -> List[dict]:
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (u:User {username: $username})-[:POSTED]->(p:Post)
+                RETURN id(p) AS id, p.content AS content, p.created_at AS timestamp,
+                    u.username AS username, u.name AS name
+                ORDER BY p.created_at DESC
+                """,
+                username=username
+            )
+
+            return [dict(record) for record in result]
 
     def get_feed(self, user_id: int) -> List[dict]:
         with self.driver.session() as conn:
