@@ -129,43 +129,58 @@ class Database:
             } for row in cursor.fetchall()]
 
     # Follow operations
-    def follow_user(self, follower_id: int, followee_id: int) -> bool:
-        with self.driver.session() as conn:
-            try:
-                conn.execute('INSERT INTO followers (follower_id, followee_id) VALUES (?, ?)', 
-                           (follower_id, followee_id))
-                return True
-            except sqlite3.IntegrityError:
-                return False
+    def follow_user(self, follower_username: str, followee_username: str) -> bool:
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (follower:User {username: $follower_username})
+                MATCH (followee:User {username: $followee_username})
+                MERGE (follower)-[r:FOLLOWS]->(followee)
+                RETURN COUNT(r) AS created
+                """,
+                follower_username=follower_username,
+                followee_username=followee_username
+            )
+            record = result.single()
+            return record["created"] > 0
 
-    def get_followers(self, user_id: int) -> List[dict]:
-        with self.driver.session() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT u.id, u.username, u.name 
-                FROM followers f 
-                JOIN users u ON f.follower_id = u.id
-                WHERE f.followee_id = ?
-            ''', (user_id,))
-            return [{'id': row[0], 'username': row[1], 'name': row[2]} for row in cursor.fetchall()]
+    def get_followers(self, username: str) -> List[dict]:
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (follower:User)-[:FOLLOWS]->(user:User {username: $username})
+                RETURN follower.username AS username, follower.name AS name
+                """,
+                username=username
+            )
+            return [dict(record) for record in result]
 
-    def get_following(self, user_id: int) -> List[dict]:
-        with self.driver.session() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT u.id, u.username, u.name 
-                FROM followers f 
-                JOIN users u ON f.followee_id = u.id
-                WHERE f.follower_id = ?
-            ''', (user_id,))
-            return [{'id': row[0], 'username': row[1], 'name': row[2]} for row in cursor.fetchall()]
 
-    def unfollow_user(self, follower_id: int, followee_id: int) -> bool:
-        with self.driver.session() as conn:
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM followers WHERE follower_id = ? AND followee_id = ?', 
-                        (follower_id, followee_id))
-            return cursor.rowcount > 0
+    def get_following(self, username: str) -> List[dict]:
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (user:User {username: $username})-[:FOLLOWS]->(followee:User)
+                RETURN followee.username AS username, followee.name AS name
+                """,
+                username=username
+            )
+            return [dict(record) for record in result]
+
+    def unfollow_user(self, follower_username: str, followee_username: str) -> bool:
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (follower:User {username: $follower_username})-[r:FOLLOWS]->(followee:User {username: $followee_username})
+                DELETE r
+                RETURN COUNT(r) AS deleted_count
+                """,
+                follower_username=follower_username,
+                followee_username=followee_username
+            )
+
+            record = result.single()
+            return record["deleted_count"] > 0
 
 
 # ======================
