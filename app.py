@@ -6,6 +6,7 @@ from typing import List, Optional
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
 import os
+import ssl
 
 # Load .env file
 load_dotenv()
@@ -15,9 +16,21 @@ URI = os.getenv("NEO4J_URI")
 USER = os.getenv("NEO4J_USER")
 PASSWORD = os.getenv("NEO4J_PASSWORD")
 
-# Create driver
-driver = GraphDatabase.driver(URI, auth=(USER, PASSWORD))
+
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = False
+ssl_context.verify_mode = ssl.CERT_NONE
+
+driver = GraphDatabase.driver(
+    URI, auth=(USER, PASSWORD), encrypted=True, ssl_context=ssl_context
+)
+
 driver.verify_connectivity()
+print("Connected successfully!")
+
+# # Create driver
+# driver = GraphDatabase.driver(URI, auth=(USER, PASSWORD))
+# driver.verify_connectivity()
 
 
 class Database:
@@ -109,24 +122,20 @@ class Database:
 
             return [dict(record) for record in result]
 
-    def get_feed(self, user_id: int) -> List[dict]:
-        with self.driver.session() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT p.id, p.content, p.timestamp, u.username, u.name 
-                FROM posts p 
-                JOIN users u ON p.user_id = u.id
-                JOIN followers f ON p.user_id = f.followee_id
-                WHERE f.follower_id = ?
-                ORDER BY p.timestamp DESC
-            ''', (user_id,))
-            return [{
-                'id': row[0],
-                'content': row[1],
-                'timestamp': row[2],
-                'username': row[3],
-                'name': row[4]
-            } for row in cursor.fetchall()]
+    def get_feed(self, username: str) -> List[dict]:
+
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (:User {username: $username})-[:FOLLOWS]->(followee:User)-[:POSTED]->(p:Post)
+                RETURN id(p) AS id, p.content AS content, p.created_at AS timestamp,
+                    followee.username AS username, followee.name AS name
+                ORDER BY p.created_at DESC
+                """,
+                username=username
+            )
+
+            return [dict(record) for record in result]
 
     # Follow operations
     def follow_user(self, follower_username: str, followee_username: str) -> bool:
